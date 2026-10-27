@@ -1,0 +1,52 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt pyinstaller
+      - run: pyinstaller --onefile --noconsole --name Kafein --hidden-import pystray._win32 kafein.py
+      - uses: actions/upload-artifact@v4
+        with: { name: Kafein-windows, path: dist/Kafein.exe }
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt pyinstaller
+      - name: Build .app
+        run: |
+          pyinstaller --windowed --name Kafein --osx-bundle-identifier com.kafein.app --hidden-import pystray._darwin kafein.py
+          plutil -insert LSUIElement -bool true dist/Kafein.app/Contents/Info.plist
+          codesign --force --deep --sign - dist/Kafein.app
+      - name: Build .dmg
+        run: |
+          mkdir dmg && cp -R dist/Kafein.app dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname Kafein -srcfolder dmg -ov -format UDZO Kafein.dmg
+      - uses: actions/upload-artifact@v4
+        with: { name: Kafein-macos, path: Kafein.dmg }
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with: { files: "artifacts/*", generate_release_notes: true }
